@@ -5,9 +5,10 @@
 
 :root{
   /* OnlyUsedTesla.ai brand — light, high-contrast */
-  --bg: #F7F6F5;               /* warm off-white (Pantone 664 C family) */
+  /* Pantone Color of the Year 2026 (approx web hex): Cloud Dancer */
+  --bg: #F0EEE9;               /* PANTONE 11-4201 TCX “Cloud Dancer” */
   --panel: #FFFFFF;            /* surfaces */
-  --panel-2: #F1F3F5;          /* subtle contrast surface */
+  --panel-2: #F6F4EF;          /* subtle contrast surface (warm) */
   --stroke: rgba(13,38,60,.12);
   --stroke-2: rgba(13,38,60,.18);
 
@@ -39,10 +40,8 @@
 html, body{ height:100%; }
 body{
   margin:0;
-  background:
-    radial-gradient(1100px 780px at 18% -10%, rgba(145,179,203,.55), transparent 60%),
-    radial-gradient(900px 650px at 100% 0%, rgba(229,218,218,.70), transparent 58%),
-    var(--bg);
+  /* Solid Cloud Dancer background (Pantone COTY 2026) */
+  background: var(--bg);
   color: var(--text);
   font-family: "Montserrat", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
   letter-spacing: -0.01em;
@@ -261,7 +260,7 @@ select:focus-visible{
 }
 .btnmeta .hint{
   font-size: 12px;
-  color: rgba(247,246,245,.70);
+  color: rgba(240,238,233,.78);
 }
 .secondarybtn .btnmeta .hint{
   color: var(--muted);
@@ -350,9 +349,10 @@ select:focus-visible{
   max-width: 78%;
   padding: 12px 12px;
   border-radius: 18px;
-  border: 1px solid var(--stroke);
-  background: var(--panel);
-  box-shadow: 0 10px 22px rgba(13,38,60,.06);
+  /* A touch more contrast so white bubbles still read on Cloud Dancer */
+  border: 1px solid rgba(13,38,60,.14);
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 12px 26px rgba(13,38,60,.08);
   line-height: 1.35;
   font-size: 14px;
   white-space: pre-wrap;
@@ -568,7 +568,7 @@ select:focus-visible{
   bottom: 64px;
   z-index: 18;
   padding: 10px 0 0;
-  background: linear-gradient(to top, rgba(247,246,245,.92), rgba(247,246,245,0));
+  background: linear-gradient(to top, rgba(240,238,233,.92), rgba(240,238,233,0));
   backdrop-filter: blur(8px);
 }
 .composerInner{
@@ -679,7 +679,7 @@ select:focus-visible{
   bottom: 0;
   z-index: 30;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, rgba(247,246,245,.96), rgba(247,246,245,.72));
+  background: linear-gradient(to top, rgba(240,238,233,.96), rgba(240,238,233,.72));
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(13,38,60,.08);
 }

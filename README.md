@@ -13,6 +13,7 @@ This repo is a **front-end only** (no backend) prototype for the **main YoYo AI 
 ## Brand theme
 
 This build uses a **lighter** OnlyUsedTesla.ai brand theme:
+- **Background:** Cloud Dancer (Pantone Color of the Year 2026) — web approx `#F0EEE9`
 - **Primary:** #0D263C (navy)
 - **Accent:** #91B3CB (light blue)
 - **Warm neutral:** #E5DADA
