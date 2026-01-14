@@ -181,7 +181,14 @@ const state = {
     transcript: "",
     speakResponses: true,
     autoSend: true
-  }
+  },
+
+  // NN/g-inspired usability helpers (accordion editing + apple picking)
+  // - selection lets users point-to-select a specific paragraph/bullet in an AI response
+  // - pinnedContext keeps a chosen snippet visible near the composer to avoid scrolling
+  selection: null,      // { msgId, blockIndex }
+  pinnedContext: null,  // { msgId, blockIndex, text }
+  modal: null           // { type: "editBlock", msgId, blockIndex }
 };
 
 /* ---------------------------
@@ -292,6 +299,142 @@ function pushMsg(msg) {
 
 function cryptoId() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16).slice(2);
+}
+
+/* ---------------------------
+   NN/g-inspired chat helpers
+   - Accordion editing: built-in collapse/expand for long responses (no re-prompt needed)
+   - Apple picking: point-to-select + pin/edit a specific paragraph/bullet
+----------------------------*/
+function textToBlocks(text) {
+  const raw = String(text || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!raw) return [];
+  const lines = raw.split("\n");
+
+  const blocks = [];
+  let buf = [];
+
+  const flush = () => {
+    if (!buf.length) return;
+    const t = buf.join("\n").trim();
+    if (t) blocks.push({ kind: "p", text: t });
+    buf = [];
+  };
+
+  for (const line of lines) {
+    const l = String(line ?? "").replace(/\s+$/g, "");
+    if (!l.trim()) {
+      flush();
+      continue;
+    }
+
+    // Treat common list markers as their own selectable blocks.
+    if (/^\s*(•|-|\*)\s+/.test(l)) {
+      flush();
+      blocks.push({ kind: "bullet", text: l.trim() });
+      continue;
+    }
+
+    buf.push(l);
+  }
+  flush();
+  return blocks;
+}
+
+function ensureBlocks(msg) {
+  if (!msg || msg.role !== "assistant" || msg.typing) return [];
+  if (!msg.blocks && msg.text) msg.blocks = textToBlocks(msg.text);
+  if (msg.collapsed == null) msg.collapsed = (msg.blocks && msg.blocks.length > 5);
+  return msg.blocks || [];
+}
+
+function findMsgById(msgId) {
+  const chat = activeChat();
+  return chat.find((m) => m && m.id === msgId) || null;
+}
+
+function setSelection(msgId, blockIndex) {
+  if (!msgId && msgId !== 0) {
+    state.selection = null;
+    render();
+    return;
+  }
+  // Toggle off when tapping the same block again.
+  if (state.selection && state.selection.msgId === msgId && state.selection.blockIndex === blockIndex) {
+    state.selection = null;
+  } else {
+    state.selection = { msgId, blockIndex };
+  }
+  render();
+}
+
+function selectedBlock() {
+  const s = state.selection;
+  if (!s) return null;
+  const m = findMsgById(s.msgId);
+  if (!m) return null;
+  const blocks = ensureBlocks(m);
+  const b = blocks[s.blockIndex];
+  if (!b) return null;
+  return { msg: m, block: b, index: s.blockIndex };
+}
+
+function shortenText(t) {
+  const s = String(t || "").replace(/\s+/g, " ").trim();
+  if (s.length <= 120) return s;
+  return (s.slice(0, 120).replace(/[\s,;:]+$/g, "") + "…");
+}
+
+function expandText(t) {
+  const s = String(t || "").trim();
+  const addon = " (More detail: In production, YoYo would expand only this section with specs, checks, and next steps.)";
+  if (!s) return s;
+  if (s.includes("More detail:")) return s; // don't spam
+  return s + addon;
+}
+
+function applyBlockEdit(mode) {
+  const sel = selectedBlock();
+  if (!sel) return;
+
+  const { msg, index } = sel;
+
+  if (mode === "remove") {
+    msg.blocks.splice(index, 1);
+    state.selection = null;
+    toast("Removed section");
+    render();
+    return;
+  }
+
+  const cur = msg.blocks[index]?.text || "";
+
+  if (mode === "shorten") {
+    msg.blocks[index].text = shortenText(cur);
+    toast("Shortened");
+    render();
+    return;
+  }
+
+  if (mode === "expand") {
+    msg.blocks[index].text = expandText(cur);
+    toast("Expanded");
+    render();
+    return;
+  }
+
+  if (mode === "pin") {
+    state.pinnedContext = { msgId: msg.id, blockIndex: index, text: cur };
+    toast("Pinned near composer");
+    render();
+    return;
+  }
+
+  if (mode === "edit") {
+    state.modal = { type: "editBlock", msgId: msg.id, blockIndex: index };
+    render();
+    return;
+  }
 }
 
 /* ---------------------------
@@ -696,10 +839,84 @@ function render() {
   ]);
   $app.appendChild(shell);
 
+  // Modal overlay (direct editing / selection tools)
+  if (state.modal) {
+    $app.appendChild(renderModal());
+  }
+
   // If we're on agent route, try to keep latest messages visible
   if (name === "agent") {
     setTimeout(scrollChatToBottom, 0);
   }
+}
+
+
+function closeModal() {
+  state.modal = null;
+  render();
+}
+
+function renderModal() {
+  const m = state.modal;
+  if (!m) return el("div");
+
+  // Only one modal type in this prototype: direct edit of a selected block.
+  if (m.type !== "editBlock") return el("div");
+
+  const msg = findMsgById(m.msgId);
+  if (!msg) return el("div");
+
+  const blocks = ensureBlocks(msg);
+  const block = blocks[m.blockIndex];
+  const initial = block ? block.text : "";
+
+  const ta = el("textarea", {
+    class: "modalTextarea",
+    rows: "6"
+  });
+  ta.value = initial;
+
+  const save = () => {
+    const next = String(ta.value || "").trimEnd();
+    if (!blocks[m.blockIndex]) return closeModal();
+    blocks[m.blockIndex].text = next;
+
+    // Keep pinned context in sync if it points at this exact block.
+    if (state.pinnedContext && state.pinnedContext.msgId === m.msgId && state.pinnedContext.blockIndex === m.blockIndex) {
+      state.pinnedContext.text = next;
+    }
+
+    toast("Updated");
+    closeModal();
+  };
+
+  return el("div", {
+    class: "modalOverlay",
+    role: "dialog",
+    "aria-modal": "true",
+    onclick: (e) => {
+      // Click outside closes.
+      if (e.target === e.currentTarget) closeModal();
+    }
+  }, [
+    el("div", {
+      class: "modalCard",
+      onclick: (e) => e.stopPropagation()
+    }, [
+      el("div", { class: "modalHeader" }, [
+        el("div", { class: "modalTitle" }, ["Edit this section"]),
+        el("button", { class: "modalX", "aria-label": "Close", onclick: closeModal }, ["✕"])
+      ]),
+      el("div", { class: "modalHint" }, [
+        "Direct edit (no new prompt) — keep what’s good, tweak what isn’t."
+      ]),
+      ta,
+      el("div", { class: "modalActions" }, [
+        el("button", { class: "modalBtn", onclick: closeModal }, ["Cancel"]),
+        el("button", { class: "modalBtn primary", onclick: save }, ["Save"])
+      ])
+    ])
+  ]);
 }
 
 function renderTopbar() {
@@ -934,7 +1151,7 @@ function renderMsg(m) {
               el("span"),
               el("span")
             ])
-          : (m.text || "")
+          : (isUser ? (m.text || "") : renderAssistantBlocks(m))
       ]),
       isTyping ? el("div", { class: "thinkingMeta" }, [`${BRAND.agentName} is thinking…`]) : null,
       (m.cards && m.cards.length) ? renderCards(m.cards) : null,
@@ -942,6 +1159,65 @@ function renderMsg(m) {
       (m.actions && m.actions.length) ? renderActions(m.actions, m.text) : null,
       (m.sources && m.sources.length) ? renderSources(m.sources) : null
     ])
+  ]);
+}
+
+function renderAssistantBlocks(m) {
+  const blocks = ensureBlocks(m);
+
+  // Fallback: if text didn't parse, render the raw string.
+  if (!blocks || !blocks.length) {
+    return el("div", { class: "bubbleText" }, [m.text || ""]);
+  }
+
+  const collapseThreshold = 6; // long responses become collapsible
+  const showCount = 4;
+
+  const canCollapse = blocks.length >= collapseThreshold;
+  const collapsed = !!m.collapsed && canCollapse;
+
+  const visible = collapsed ? blocks.slice(0, showCount) : blocks;
+
+  const list = el("div", { class: "ablockList" }, visible.map((b, i) => renderAblock(m, i, b)));
+
+  if (canCollapse) {
+    const hidden = Math.max(0, blocks.length - showCount);
+    list.appendChild(
+      el("button", {
+        class: "showMoreBtn",
+        onclick: () => {
+          // If collapsing hides the currently selected block, clear selection to avoid confusion.
+          if (!collapsed && state.selection && state.selection.msgId === m.id && state.selection.blockIndex >= showCount) {
+            state.selection = null;
+          }
+          m.collapsed = !collapsed;
+          render();
+        }
+      }, [collapsed ? `Show ${hidden} more` : "Show less"])
+    );
+  }
+
+  return list;
+}
+
+function renderAblock(msg, idx, block) {
+  const selected = !!(state.selection && state.selection.msgId === msg.id && state.selection.blockIndex === idx);
+
+  return el("div", {
+    class: `ablock ${block.kind || "p"}`,
+    dataset: { selected: String(selected) },
+    role: "button",
+    tabindex: "0",
+    onclick: () => setSelection(msg.id, idx),
+    onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setSelection(msg.id, idx);
+      }
+    }
+  }, [
+    el("span", { class: "ablockNum", "aria-hidden": "true" }, [String(idx + 1)]),
+    el("div", { class: "ablockText" }, [block.text])
   ]);
 }
 
@@ -1125,6 +1401,85 @@ function toggleSave(id) {
   render();
 }
 
+function renderToolBtn(label, opts = {}) {
+  return el("button", {
+    class: `toolBtn${opts.tone ? " " + opts.tone : ""}`,
+    onclick: (e) => {
+      e.preventDefault();
+      opts.onClick && opts.onClick();
+    }
+  }, [label]);
+}
+
+function renderPinnedContextCard() {
+  const p = state.pinnedContext;
+  if (!p || !p.text) return null;
+
+  const preview = shortenText(p.text).replace(/^•\s*/g, "");
+
+  return el("div", { class: "contextCard" }, [
+    el("div", { class: "contextTop" }, [
+      el("div", { class: "contextTitle" }, ["Pinned context"]),
+      el("button", {
+        class: "contextX",
+        "aria-label": "Remove pinned context",
+        onclick: () => {
+          state.pinnedContext = null;
+          render();
+        }
+      }, ["✕"])
+    ]),
+    el("div", { class: "contextPreview" }, [preview]),
+    el("div", { class: "contextHint" }, [
+      "Keeps this snippet visible so you don’t have to scroll (apple-picking helper)."
+    ])
+  ]);
+}
+
+function renderSelectionCard() {
+  const sel = selectedBlock();
+  if (!sel) return null;
+
+  const preview = shortenText(sel.block.text).replace(/^•\s*/g, "");
+
+  return el("div", { class: "contextCard" }, [
+    el("div", { class: "contextTop" }, [
+      el("div", { class: "contextTitle" }, [`Selected section #${sel.index + 1}`]),
+      el("button", {
+        class: "contextX",
+        "aria-label": "Clear selection",
+        onclick: () => {
+          state.selection = null;
+          render();
+        }
+      }, ["✕"])
+    ]),
+    el("div", { class: "contextPreview" }, [preview]),
+    el("div", { class: "toolRow" }, [
+      renderToolBtn("Edit", { onClick: () => applyBlockEdit("edit"), tone: "primary" }),
+      renderToolBtn("Shorten", { onClick: () => applyBlockEdit("shorten") }),
+      renderToolBtn("Expand", { onClick: () => applyBlockEdit("expand") }),
+      renderToolBtn("Remove", { onClick: () => applyBlockEdit("remove"), tone: "danger" }),
+      renderToolBtn("Pin", { onClick: () => applyBlockEdit("pin") })
+    ]),
+    el("div", { class: "contextHint" }, [
+      "Tap any paragraph/bullet in YoYo’s message to point-to-select (accordion-editing helper)."
+    ])
+  ]);
+}
+
+function renderComposerContext() {
+  const blocks = [];
+  const selCard = renderSelectionCard();
+  const pinCard = renderPinnedContextCard();
+  if (pinCard) blocks.push(pinCard);
+  if (selCard) blocks.push(selCard);
+
+  if (!blocks.length) return null;
+
+  return el("div", { class: "contextStack" }, blocks);
+}
+
 function renderComposer() {
   const placeholder = state.activeFlow === "shop"
     ? `Ask ${BRAND.agentName} about inventory, trims, options…`
@@ -1147,7 +1502,10 @@ function renderComposer() {
     }
   });
 
+  const context = renderComposerContext();
+
   return el("div", { class: "composer" }, [
+    context,
     el("div", { class: "composerInner" }, [
       el("div", {
         class: "inputWrap",

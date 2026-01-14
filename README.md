@@ -6,6 +6,12 @@ This repo is a **front-end only** (no backend) prototype for the **main YoYo AI 
 - A **seller “cash offer” flow** (intake → dealer offers → accept/decline)
 - A **web-search fallback** pattern (answer + **sources**) for questions the agent can’t answer from training data or inventory data
 
+Plus NN/g-inspired chat usability helpers:
+- **Tap-to-select paragraphs/bullets** in YoYo’s messages (point-to-select)
+- **Edit / shorten / expand / remove** a *single* selected section (compartmentalized edits)
+- **Pin a snippet** near the composer to avoid excessive scrolling (apple-picking helper)
+- **Show more / show less** for long responses (lightweight “accordion” collapse)
+
 > Not affiliated with Tesla, Inc. “Tesla” is used to describe vehicle inventory only.
 
 ---
